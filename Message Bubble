@@ -1,0 +1,131 @@
+// MessageBubble.tsx
+import { useMemo, useState } from "react";
+import { cn } from "../../lib/utils";
+import type { Message } from "../../types/messaging";
+import { MessageSourceBadge, type MessageSource } from "./MessageSourceBadge";
+
+interface MessageBubbleProps {
+  message: Message;
+}
+
+export const MessageBubble = ({ message }: MessageBubbleProps) => {
+  // Detect message source from localStorage (for outgoing messages)
+  const messageSource = useMemo((): MessageSource | null => {
+    if (!message.isOutgoing || !message.content) return null;
+
+    try {
+      // Try to find by conversation ID and content
+      const contentHash = message.content.substring(0, 50);
+      const conversationId = message.conversationId;
+
+      if (conversationId) {
+        const key = `msg_source_${conversationId}_${contentHash}`;
+        const stored = localStorage.getItem(key);
+
+        if (stored) {
+          const data = JSON.parse(stored);
+          return data.source as MessageSource;
+        }
+      }
+
+      // Fallback: check by content match (last 20 messages)
+      const allKeys = Object.keys(localStorage)
+        .filter((k) => k.startsWith("msg_source_"))
+        .slice(-20);
+
+      for (const key of allKeys) {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          try {
+            const data = JSON.parse(stored);
+            if (data.content === message.content) {
+              return data.source as MessageSource;
+            }
+          } catch {
+            // skip invalid entries
+          }
+        }
+      }
+
+      // Fallback: derive from backend percent if available (survives refresh)
+      const percent = (message as any)?.messageMatchingSuggestionPercent;
+      if (typeof percent === "number") {
+        if (percent >= 100) return "ai";
+        if (percent >= 30) return "edited";
+        return "user";
+      }
+    } catch (error) {
+      console.error("[MessageBubble] Error reading message source:", error);
+    }
+
+    return null;
+  }, [
+    message.isOutgoing,
+    message.content,
+    message.id,
+    message.conversationId,
+  ]);
+
+  // State for toggling timestamp visibility
+  const [showTimestamp, setShowTimestamp] = useState(false);
+
+  // Format timestamp to display time only
+  const formatTimestamp = (timestamp: string) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  };
+
+  // Toggle timestamp visibility on click
+  const handleBubbleClick = () => {
+    setShowTimestamp((prev) => !prev);
+  };
+
+  const hasBadge = message.isOutgoing && messageSource;
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col max-w-[85%] mb-4",
+        message.isOutgoing ? "ml-auto items-end" : "mr-auto items-start"
+      )}
+    >
+      {/* Clickable message bubble */}
+      <div
+        onClick={handleBubbleClick}
+        className={cn(
+          "px-4 py-2.5 rounded-2xl shadow-sm border border-white/50 cursor-pointer hover:opacity-90 transition-opacity",
+          message.isOutgoing
+            ? "bg-white text-gray-800 rounded-br-none"
+            : "bg-white text-gray-800 rounded-bl-none"
+        )}
+      >
+        <p className="text-sm leading-relaxed select-text">
+          {message.content}
+        </p>
+      </div>
+
+      {/* Message source badge for outgoing messages */}
+      {hasBadge && (
+        <div className="flex items-center px-1 mt-1">
+          <MessageSourceBadge source={messageSource} />
+        </div>
+      )}
+
+      {/* Timestamp - appears below badge if badge exists */}
+      {showTimestamp && (
+        <span
+          className={cn(
+            "text-[10px] text-gray-500 px-1 transition-opacity duration-200",
+            !hasBadge && "mt-1"
+          )}
+        >
+          {formatTimestamp(message.createdAt)}
+        </span>
+      )}
+    </div>
+  );
+};
